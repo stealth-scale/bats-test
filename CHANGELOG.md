@@ -6,6 +6,10 @@ Every change a consumer would notice is recorded here. The format follows
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-19
+
+First tagged release.
+
 ### Added
 
 - The Alpine image: bash at a chosen version, bats-core at a chosen version, GNU tools, jq,
@@ -25,4 +29,5 @@ Every change a consumer would notice is recorded here. The format follows
 - Tests of the image, run inside it: tools, versions, every entrypoint command, its
   signal handling, and the exit status, floor and output semantics of `kcov-bats`.
 
-[Unreleased]: https://github.com/stealth-scale/bats-test/commits/main
+[Unreleased]: https://github.com/stealth-scale/bats-test/compare/v1.0.0...main
+[1.0.0]: https://github.com/stealth-scale/bats-test/releases/tag/v1.0.0
