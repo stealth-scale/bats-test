@@ -9,8 +9,8 @@ and tested here, published to `ghcr.io/stealth-scale/bats-test`, pulled by every
 | `bash{4.4,5.1,5.2,5.3}-bats{1.7.0,1.14.0}` | the bash by bats matrix, on Alpine |
 | `fedora` | Fedora 44 with its own bash and bats, glibc |
 
-Every tag has the GNU tools in place of the busybox applets, jq, git, and kcov with one fix
-of its own. The section on kcov states the fix.
+Every tag has the GNU tools in place of the busybox applets, jq, git, and kcov with two
+fixes of its own. The section on kcov states them.
 
 ## Using it
 
@@ -56,13 +56,19 @@ its errors. The log is printed when the suite did not run to completion.
 
 ## Why kcov is built from source
 
-kcov traces bash through a helper it injects into every shell, and that helper expands
-`${BASH_SOURCE}` without a default. At the top level of a `bash -c` child that runs with
-`set -u`, `BASH_SOURCE` is unset, so the child dies on its first command with
-`BASH_SOURCE: unbound variable`. Any suite that starts such children fails only under
-kcov. [patches/kcov-bash-helper-nounset.patch](patches/kcov-bash-helper-nounset.patch)
-guards the expansion. The image builds kcov v43 with it, from kcov's own Alpine and Fedora
-recipes. The patch is meant for upstream.
+The image builds kcov v43 from kcov's own Alpine and Fedora recipes, with two fixes to
+its bash engine. Both are in [patches/](patches/), written for upstream.
+
+- kcov traces bash through a helper it injects into every shell, and that helper expands
+  `${BASH_SOURCE}` without a default. At the top level of a `bash -c` child that runs
+  with `set -u`, `BASH_SOURCE` is unset, so the child dies on its first command with
+  `BASH_SOURCE: unbound variable`. Any suite that starts such children fails only under
+  kcov. The patch guards the expansion.
+- kcov tracks single quotes across trace lines and drops every line while it believes a
+  quote is open. A value with a quote in it inside a `[[ ]]` test, or bash 5.3's `$'…'`
+  quoting with `\'` inside, leaves it in that state, and every hit after that point is
+  lost. On bash 5.3 with bats-core 1.14.0 a suite reported 0%. The patch resets the
+  state on every marker line and reads `$'…'` with its escapes.
 
 Two more things about kcov's bash engine worth knowing:
 

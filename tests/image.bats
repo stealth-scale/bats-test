@@ -81,7 +81,7 @@ start_entrypoint() {
 @test "entrypoint: test -> runs bats on the arguments" {
     run entrypoint test "$fixture/tests/greet.bats"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"1..4"* ]]
+    [[ "$output" == *"1..5"* ]]
 }
 
 @test "entrypoint: test on a failing suite -> non-zero" {

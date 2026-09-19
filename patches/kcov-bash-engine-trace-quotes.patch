@@ -1,0 +1,86 @@
+From: Roy Klopper <roy.klopper@stealthscale.io>
+Subject: [PATCH] bash-engine: never drop a marker line over a quote in the trace
+
+The bash engine tracks single quotes across trace lines, so that the
+rest of a '...' word that spans lines is not printed as output. While
+it believes a quote is open it drops every line, marker lines included.
+Two kinds of trace line leave it in that state by mistake:
+
+- xtrace prints the words of a [[ ]] test as they are. A value with a
+  quote in it, [[ -z it's ]], has one quote on the line.
+- bash 5.3 prints words with control characters as $'...' and escapes
+  a quote inside as \'. The engine counts that quote.
+
+After either, the engine reports nothing until another line happens to
+have an odd number of quotes. bats-core 1.14 saves the traps in `run`
+with such a $'...' word, so on bash 5.3 a bats suite reports no
+coverage at all.
+
+A marker starts a command, so no quote is open in front of it: reset
+the state on every marker line and attribute the line. Keep the state
+for lines without a marker, which is what hides the rest of a quoted
+word. Read $'...' with its escapes.
+---
+ src/engines/bash-engine.cc |   25 ++++++++++++++++++-------
+ 1 file changed, 18 insertions(+), 7 deletions(-)
+
+diff --git a/src/engines/bash-engine.cc b/src/engines/bash-engine.cc
+--- a/src/engines/bash-engine.cc
++++ b/src/engines/bash-engine.cc
+@@ -39,6 +39,7 @@
+ 	INPUT_NORMAL,       // No multiline stuff
+ 	INPUT_QUOTE,        // "
+ 	INPUT_SINGLE_QUOTE, // '
++	INPUT_ANSI_QUOTE,   // $'...', backslash escapes inside, never spans lines
+ 	INPUT_MULTILINE,    // backslash backslash
+ };
+ 
+@@ -280,17 +281,20 @@
+ 		std::string cur(curLine);
+ 		// Line markers always start with kcov@
+ 
+-		if (m_inputType == INPUT_SINGLE_QUOTE) {
+-			m_inputType = getInputType(cur);
+-			return true;
+-		}
+-
+ 		size_t kcovStr = cur.find("kcov@");
+ 		if (kcovStr == std::string::npos)
+ 		{
+-			fprintf(stderr, "%s", cur.c_str());
++			// The rest of a single-quoted word that spans lines is not
++			// output. Any other line without a marker is.
++			if (m_inputType != INPUT_SINGLE_QUOTE)
++				fprintf(stderr, "%s", cur.c_str());
++			m_inputType = getInputType(cur);
+ 			return true;
+ 		}
++		// A marker starts a command, so no quote is open in front of it. A
++		// quote in the data of a [[ ]] test, which xtrace prints as is, must
++		// not hide the commands after it.
++		m_inputType = INPUT_NORMAL;
+ 		m_inputType = getInputType(cur);
+ 
+ 		std::vector<std::string> parts = split_string(cur.substr(kcovStr), "@");
+@@ -534,13 +538,20 @@
+ 		return out;
+ 	}
+ 
++	// Follows the quoting of bash's xtrace output: '...' may span lines, and $'...'
++	// (bash 5.3 uses it for words with control characters) escapes with backslashes,
++	// \' included, so a quote inside it does not end it.
+ 	enum InputType getInputType(const std::string &str)
+ 	{
+ 		enum InputType out = m_inputType;
+ 
+ 		for(std::string::size_type i = 0; i < str.size(); ++i) {
+-			if (str[i] == '\\' && out == INPUT_NORMAL)
++			if (str[i] == '\\' && out != INPUT_SINGLE_QUOTE)
+ 				i++;
++			else if (str[i] == '\'' && out == INPUT_ANSI_QUOTE)
++				out = INPUT_NORMAL;
++			else if (str[i] == '\'' && out == INPUT_NORMAL && i > 0 && str[i - 1] == '$')
++				out = INPUT_ANSI_QUOTE;
+ 			else if (str[i] == '\'')
+ 				out = (out == INPUT_NORMAL ? INPUT_SINGLE_QUOTE : INPUT_NORMAL);
+ 		}

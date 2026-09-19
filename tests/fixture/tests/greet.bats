@@ -1,6 +1,13 @@
 #!/usr/bin/env bats
 load ../src/greet
 setup() { bats_require_minimum_version 1.5.0; }
+# First on purpose: bash 5.3 traces this value as $'it\'s\ttabbed', and a kcov that
+# misreads the escaped quote discards every trace line after it.
+@test "greet: quote and tab -> greets it, and kcov reads past the ANSI-C quoted trace" {
+    local name=$'it\'s\ttabbed'
+    run greet "$name"
+    [ "$output" = "hello, $name" ]
+}
 @test "greet: name -> greets it" { run greet world; [ "$output" = "hello, world" ]; }
 @test "greet: no name -> stranger" { run greet; [ "$output" = "hello, stranger" ]; }
 @test "greet: twice -> two lines, compared in one multi-line test kcov cannot place" {
