@@ -9,7 +9,7 @@ and tested here, published to `ghcr.io/stealth-scale/bats-test`, pulled by every
 | `bash{4.4,5.1,5.2,5.3}-bats{1.7.0,1.14.0}` | the bash by bats matrix, on Alpine |
 | `fedora` | Fedora 44 with its own bash and bats, glibc |
 
-Every tag has the GNU tools in place of the busybox applets, jq, git, and kcov with two
+Every tag has the GNU tools in place of the busybox applets, jq, git, and kcov with three
 fixes of its own. The section on kcov states them.
 
 ## Using it
@@ -57,8 +57,9 @@ and its errors. The log is printed when the suite did not run to completion.
 
 ## Why kcov is built from source
 
-The image builds kcov v43 from kcov's own Alpine and Fedora recipes, with two fixes to
-its bash engine. Both are in [patches/](patches/), written for upstream.
+The image builds kcov v43 from kcov's own Alpine and Fedora recipes, with three fixes to
+its bash engine. The fixes are in [patches/](patches/), written for upstream.
+`tests/fixture/src/lines.bash` has one case per line pattern they correct.
 
 - kcov traces bash through a helper it injects into every shell, and that helper expands
   `${BASH_SOURCE}` without a default. At the top level of a `bash -c` child that runs
@@ -70,13 +71,14 @@ its bash engine. Both are in [patches/](patches/), written for upstream.
   quoting with `\'` inside, leaves it in that state, and every hit after that point is
   lost. On bash 5.3 with bats-core 1.14.0 a suite reported 0%. The patch resets the
   state on every marker line and reads `$'…'` with its escapes.
-
-Two more things about kcov's bash engine worth knowing:
-
-- A double-quoted string that spans lines counts each inner line as a line, and credits
-  the hit to the closing line. A report with a long string body shows a few false misses.
-- A string line that is a rule of `=` and ends in the closing quote stops the parser for
-  the rest of the file. Put such a rule in a variable.
+- kcov's parser counts every line of a command that spans lines, while bash reports
+  one: the first since 5.3, before that the line where the second word ends, and for a
+  `[[ ]]` test the last. Each multi-line awk program, string or test showed lines that
+  no test reaches, and a string line that is a rule of `=` put the parser in the wrong
+  quote state for the rest of the file. The parser also counted `fi ;;` and
+  `done < <(cmd)`. The patch tracks quotes across lines, credits a hit anywhere in such
+  a command to its first line, takes the last line of a `[[ ]]` test, and skips the
+  closing keywords. On bats-mock the count went from 659 lines at 88% to 613 at 100%.
 
 ## Working here
 

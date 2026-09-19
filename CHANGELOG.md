@@ -17,9 +17,11 @@ Every change a consumer would notice is recorded here. The format follows
 - `kcov-bats`: bats under kcov with bats' own exit status, a table per file with the
   uncovered lines, truncated percentages from the line counts of the report, a `--min`
   floor, and kcov's own output in `OUT/kcov.log` instead of the terminal.
-- kcov v43 built with two fixes to its bash engine: a traced `bash -c` child under `set -u`
-  no longer fails with `BASH_SOURCE: unbound variable`, and a quote inside a `[[ ]]` value
-  or in bash 5.3's `$'…'` quoting no longer hides every hit after it.
+- kcov v43 built with three fixes to its bash engine: a traced `bash -c` child under
+  `set -u` no longer fails with `BASH_SOURCE: unbound variable`, a quote inside a `[[ ]]`
+  value or in bash 5.3's `$'…'` quoting no longer hides every hit after it, and a
+  command that spans lines counts as one line, so a multi-line string, awk program or
+  `[[ ]]` test, `fi ;;` and `done < <(cmd)` no longer show as uncovered.
 - Tests of the image, run inside it: tools, versions, every entrypoint command, its
   signal handling, and the exit status, floor and output semantics of `kcov-bats`.
 

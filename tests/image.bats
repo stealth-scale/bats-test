@@ -203,6 +203,12 @@ start_entrypoint() {
     [[ "$output" != *"unbound variable"* ]]
 }
 
+@test "kcov-bats: lines bash never reports -> not counted, a command that spans lines is one" {
+    run kcov-bats --src "$fixture/src" --out "$out" -- "$fixture/tests/lines.bats"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ tests/fixture/src/lines\.bash\ +18\ +18\ +100% ]]
+}
+
 @test "kcov-bats: kcov's own output -> in OUT/kcov.log, not on stderr" {
     run --separate-stderr kcov-bats --src "$fixture/src" --out "$out" -- "$fixture/tests/greet.bats"
     [ "$status" -eq 0 ]

@@ -27,14 +27,10 @@
 # errors. The log is printed when the suite did not run to completion.
 #
 # The percentages are truncated: 99.9% prints as 99%, and --min 100 wants every line.
-#
-# kcov's bash parser has one known trap: a line inside a double-quoted string that
-# is a rule of `=` ending in the closing quote stops it for the rest of the file.
-# Put the rule in a variable.
 set -uo pipefail
 
 if [[ "${1-}" == -h || "${1-}" == --help ]]; then
-    sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
 fi
 

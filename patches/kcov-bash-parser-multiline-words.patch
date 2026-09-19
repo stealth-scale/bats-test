@@ -1,0 +1,351 @@
+From: Roy Klopper <roy.klopper@stealthscale.io>
+Subject: [PATCH] bash-engine: count a command that spans lines as one line
+
+The parser marks every line of a quoted word that spans lines as code,
+apart from the "..." of an assignment, where it marks the closing line
+and not the first. Bash reports one line for such a command: the first
+line since 5.3, and before that the line on which the command's second
+word ends. The lines bash does not report stay at zero hits, and the
+line it does report is often one the parser did not mark. A multi-line
+awk program, a printf with a string that spans lines or a value with a
+newline in it each cost a few lines of coverage that no test can earn.
+
+The parser also marks "fi ;;", "esac ;;", "done < <(cmd)", "done | cmd"
+and "} 2>/dev/null" as code. Bash reports no line for these.
+
+- Track the quote a line ends in, for "...", '...' and $'...', with
+  their escapes. The lines after the first are no code, and a hit on
+  any of them is credited to the first line. The same for the lines of
+  a backslash continuation.
+- Treat a closing keyword followed by the terminator of a case item, a
+  redirection, a pipe or & as no code. "} || return 1" and "fi; cmd"
+  stay code.
+- Take body+="${name}() {" for the string it starts, not for a function
+  definition, so that the word it opens is tracked.
+- Treat a [[ ]] test that spans lines like arithmetic: bash reports the
+  line it ends on, so only that line is code. Do the same for (( ))
+  arithmetic without a $ in front.
+- Move the expectation of the tests from the closing line of a
+  multi-line word to its first line.
+---
+ src/engines/bash-engine.cc |  210 +++++++++++++++++++++++++++++++++++---------
+ tests/tools/test_bash.py   |    9 +-
+ 2 files changed, 174 insertions(+), 45 deletions(-)
+
+diff --git a/src/engines/bash-engine.cc b/src/engines/bash-engine.cc
+--- a/src/engines/bash-engine.cc
++++ b/src/engines/bash-engine.cc
+@@ -17,6 +17,8 @@
+ #include <signal.h>
+ #include <dirent.h>
+ #include <stdio.h>
++#include <ctype.h>
++#include <string.h>
+ 
+ #include <list>
+ #include <unordered_map>
+@@ -334,8 +336,15 @@
+ 		{
+ 			uint64_t address = 0;
+ 			Event ev;
++			unsigned int line = string_to_integer(lineNo);
+ 
+-			LineIdToAddressMap_t::iterator it = m_lineIdToAddress.find(getLineId(filename, string_to_integer(lineNo)));
++			// A hit on a later line of a command that spans lines, which bash
++			// reports depending on its version, belongs to the line it starts on
++			LineAliasMap_t::iterator alias = m_lineAlias.find(getLineId(filename, line));
++			if (alias != m_lineAlias.end())
++				line = alias->second;
++
++			LineIdToAddressMap_t::iterator it = m_lineIdToAddress.find(getLineId(filename, line));
+ 			if (it != m_lineIdToAddress.end())
+ 				address = it->second;
+ 
+@@ -641,15 +650,112 @@
+ 		}
+ 	}
+ 
++	// The quote a word of source is in at the end of a line
++	enum WordState
++	{
++		word_none,
++		word_double, // "..."
++		word_single, // '...'
++		word_ansi,   // $'...'
++	};
++
++	// The quote state at the end of a line of source, from the state at its start.
++	// Outside quotes a backslash escapes the next character and # opens a comment.
++	// In "..." and $'...' a backslash escapes the next character; '...' escapes nothing.
++	enum WordState scanWord(const std::string &line, enum WordState state)
++	{
++		for (std::string::size_type i = 0; i < line.size(); ++i)
++		{
++			char c = line[i];
++
++			switch (state)
++			{
++			case word_none:
++				if (c == '\\')
++					i++;
++				else if (c == '#' && (i == 0 || isspace(line[i - 1]) || line[i - 1] == ';'
++						|| line[i - 1] == '(' || line[i - 1] == '|' || line[i - 1] == '&'))
++					return state;
++				else if (c == '"')
++					state = word_double;
++				else if (c == '\'')
++					state = (i > 0 && line[i - 1] == '$') ? word_ansi : word_single;
++				break;
++			case word_double:
++			case word_ansi:
++				if (c == '\\')
++					i++;
++				else if (c == '"' && state == word_double)
++					state = word_none;
++				else if (c == '\'' && state == word_ansi)
++					state = word_none;
++				break;
++			case word_single:
++				if (c == '\'')
++					state = word_none;
++				break;
++			}
++		}
++
++		return state;
++	}
++
++	size_t countOccurrences(const std::string &s, const char *what)
++	{
++		size_t n = 0;
++
++		for (size_t pos = s.find(what); pos != std::string::npos; pos = s.find(what, pos + strlen(what)))
++			n++;
++
++		return n;
++	}
++
++	// fi ;;  esac ;&  done < <(cmd)  done | tee  } 2>/dev/null: a closing keyword
++	// with the terminator of a case item, a redirection, a pipe or & after it.
++	// Bash reports no line for these. "} || return 1" and "fi; cmd" run a command
++	// of their own and stay code.
++	bool isClosingLine(const std::string &s)
++	{
++		static const char *closers[] = { "fi", "done", "esac", "}", NULL };
++
++		for (const char **closer = closers; *closer; closer++)
++		{
++			size_t n = strlen(*closer);
++
++			if (s.size() <= n || s.compare(0, n, *closer) != 0)
++				continue;
++			// finish, done_flag=1
++			if (!isspace(s[n]) && s[n] != ';' && s[n] != '<' && s[n] != '>' && s[n] != '|' && s[n] != '&')
++				continue;
++
++			std::string rest = trim_string(s.substr(n));
++
++			if (rest.compare(0, 2, ";;") == 0 || rest.compare(0, 2, ";&") == 0)
++				return true;
++			if (rest.compare(0, 2, "||") == 0 || rest.compare(0, 2, "&&") == 0 || rest.compare(0, 2, "<<") == 0)
++				return false;
++			if (rest[0] == '<' || rest[0] == '>' || rest[0] == '|' || rest[0] == '&')
++				return true;
++			if (isdigit(rest[0]) && rest.size() > 1 && (rest[1] == '>' || rest[1] == '<'))
++				return true;
++		}
++
++		return false;
++	}
++
+ 	void parseFileFull(const std::string &filename, const std::vector<std::string> &lines, uint32_t crc)
+ 	{
+ 		unsigned int lineNo = 0;
+ 		enum
+ 		{
+-			none, backslash, quote, heredoc
++			none, backslash, heredoc
+ 		} state = none;
++		// A quoted word that spans lines, and the line its command starts on
++		enum WordState word = word_none;
++		unsigned int commandStart = 0;
+ 		bool caseActive = false;
+ 		bool arithmeticActive = false;
++		bool testActive = false;
+ 		std::string heredocMarker;
+ 
+ 		for (std::vector<std::string>::const_iterator it = lines.begin(); it != lines.end(); ++it)
+@@ -660,6 +766,36 @@
+ 
+ 			kcov_debug(ENGINE_MSG, "bash_line %2d: %s\n", lineNo, s.c_str());
+ 
++			// HERE documents
++			if (state == heredoc)
++			{
++				std::string trimmed = trim_string(s, " \t\r\n`");
++
++				if (trimmed == heredocMarker)
++					state = none;
++				continue;
++			}
++
++			// The rest of a quoted word that spans lines: no code, and a hit
++			// here belongs to the line the command starts on
++			if (word != word_none)
++			{
++				word = scanWord(*it, word);
++				m_lineAlias[getLineId(filename, lineNo)] = commandStart;
++				continue;
++			}
++
++			// Handle backslashes - only the first line is code
++			if (state == backslash)
++			{
++				if (s.empty() || s[s.size() - 1] != '\\')
++					state = none;
++				m_lineAlias[getLineId(filename, lineNo)] = commandStart;
++				// The continuation may open a word that spans lines
++				word = scanWord(*it, word_none);
++				continue;
++			}
++
+ 			// Remove comments
+ 			size_t comment = s.find("#");
+ 			if (comment != std::string::npos)
+@@ -699,6 +835,10 @@
+ 			if (s == "esac" || s == "fi" || s == "do" || s == "done" || s == "else" || s == "then")
+ 				continue;
+ 
++			// The same endings with what may follow them on their line
++			if (isClosingLine(s))
++				continue;
++
+ 			// Functions
+ 			if (s.find("function") == 0)
+ 				continue;
+@@ -715,52 +855,35 @@
+ 
+ 				std::string substr = s.substr(0, fnPos);
+ 
+-				// Should be a single word (the function name)
+-				if (substr.find(" ") == std::string::npos)
++				// Should be a single word (the function name), and not the start
++				// of a string such as body+="${name}() {
++				if (substr.find(" ") == std::string::npos && substr.find_first_of("=\"'$`{}") == std::string::npos)
+ 					continue;
+ 			}
+ 
+-			// Handle backslashes - only the first line is code
+-			if (state == backslash)
+-			{
+-				if (s[s.size() - 1] != '\\')
+-					state = none;
+-				continue;
+-			}
+-
+-			// Multi-line quote - only the last line is code
+-			if (state == quote)
+-			{
+-				if (s.find('"') == s.size() - 1) // String ends with "
+-					state = none;
+-				else
+-					continue;
+-			}
+-
+-			// HERE documents
+-			if (state == heredoc)
+-			{
+-				std::string trimmed = trim_string(s, " \t\r\n`");
+-
+-				if (trimmed == heredocMarker)
+-					state = none;
+-				continue;
+-			}
+-
+-			if (s.find("$((") != std::string::npos || s.find("$[") != std::string::npos)
++			if (s.find("$((") != std::string::npos || s.find("$[") != std::string::npos || s.find("((") == 0)
+ 				arithmeticActive = true;
+ 
+-			if (s[s.size() - 1] == '\\')
++			// A [[ ]] test that spans lines: bash reports the line it ends on, as
++			// for arithmetic, so only that line is code
++			size_t testOpens = countOccurrences(s, "[[");
++			size_t testCloses = countOccurrences(s, "]]");
++			if (testOpens > testCloses)
++				testActive = true;
++			else if (testCloses > 0)
++				testActive = false;
++
++			// A word still open at the end of the line continues on the next one
++			word = scanWord(*it, word_none);
++			if (word != word_none)
++				commandStart = lineNo;
++
++			if (word == word_none && s[s.size() - 1] == '\\')
+ 			{
+ 				state = backslash;
++				commandStart = lineNo;
+ 			}
+-			else if ((s.find("=\"") != std::string::npos || // Handle multi-line string assignments
+-					s.find("= \"") != std::string::npos) && std::count(s.begin(), s.end(), '"') == 1)
+-			{
+-				state = quote;
+-				continue;
+-			}
+-			else
++			else if (word == word_none)
+ 			{
+ 				size_t heredocStart = s.find("<<");
+ 
+@@ -821,8 +944,8 @@
+ 			if (s.find("))") != std::string::npos || s.find("]") != std::string::npos)
+ 				arithmeticActive = false;
+ 
+-			// Only the last line of arithmetic is code
+-			if (arithmeticActive)
++			// Only the last line of arithmetic, or of a test, is code
++			if (arithmeticActive || testActive)
+ 				continue;
+ 
+ 			// Case switches are nocode
+@@ -838,11 +961,14 @@
+ 		}
+ 	}
+ 
++	typedef std::unordered_map<uint64_t, unsigned int> LineAliasMap_t;
++
+ 	pid_t m_child;
+ 	FILE *m_stderr;
+ 	FILE *m_stdout;
+ 	bool m_bashSupportsXtraceFd;
+ 	enum InputType m_inputType;
++	LineAliasMap_t m_lineAlias;
+ };
+ 
+ // This ugly stuff should be fixed
+diff --git a/tests/tools/test_bash.py b/tests/tools/test_bash.py
+--- a/tests/tools/test_bash.py
++++ b/tests/tools/test_bash.py
+@@ -40,8 +40,8 @@
+ 
+         assert cobertura.hitsPerLine(dom, "short-test.sh", 5) == 11
+         assert cobertura.hitsPerLine(dom, "shell-main", 128) == 1
+-        assert cobertura.hitsPerLine(dom, "shell-main", 132) is None
+-        assert cobertura.hitsPerLine(dom, "shell-main", 135) == 1
++        assert cobertura.hitsPerLine(dom, "shell-main", 132) == 1
++        assert cobertura.hitsPerLine(dom, "shell-main", 135) is None
+         assert cobertura.hitsPerLine(dom, "shell-main", 136) == 1
+ 
+         assert b"I'm echoing to stderr via some" in o
+@@ -350,7 +350,10 @@
+         )
+         dom = cobertura.parseFile(self.outbase + "/kcov/subshell.sh/cobertura.xml")
+         self.assertIsNone(cobertura.hitsPerLine(dom, "subshell.sh", 1))
+-        self.assertEqual(2, cobertura.hitsPerLine(dom, "subshell.sh", 4))
++        # eval and its first echo, plus the second echo on bash 5.3, which
++        # counts the lines of the eval'd string from the line of the eval
++        self.assertIn(cobertura.hitsPerLine(dom, "subshell.sh", 2), (2, 3))
++        self.assertIsNone(cobertura.hitsPerLine(dom, "subshell.sh", 4))
+         self.assertEqual(0, cobertura.hitsPerLine(dom, "subshell.sh", 8))
+ 
+ 
