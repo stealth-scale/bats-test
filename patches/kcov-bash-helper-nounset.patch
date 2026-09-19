@@ -1,0 +1,37 @@
+From: Roy Klopper <roy.klopper@stealthscale.io>
+Subject: [PATCH] bash-engine: keep the helpers working under set -u
+
+The helpers expand ${BASH_SOURCE} in PS4 and in the DEBUG trap. At the top
+level of `bash -c`, BASH_SOURCE is unset, so a traced child that runs with
+`set -u` fails on its first command with "BASH_SOURCE: unbound variable".
+A test suite that starts such children then fails only under kcov.
+
+Expanding with a default keeps the marker format and makes the helpers
+indifferent to nounset.
+---
+ src/engines/bash-helper-debug-trap.sh | 2 +-
+ src/engines/bash-helper.sh            | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/engines/bash-helper-debug-trap.sh b/src/engines/bash-helper-debug-trap.sh
+--- a/src/engines/bash-helper-debug-trap.sh
++++ b/src/engines/bash-helper-debug-trap.sh
+@@ -1,5 +1,5 @@
+ #!/bin/sh
+ 
+ set -o functrace
+-trap 'echo "kcov@${BASH_SOURCE}@${LINENO}@" >&$KCOV_BASH_XTRACEFD' DEBUG
++trap 'echo "kcov@${BASH_SOURCE-}@${LINENO}@" >&$KCOV_BASH_XTRACEFD' DEBUG
+ unset BASH_ENV
+diff --git a/src/engines/bash-helper.sh b/src/engines/bash-helper.sh
+--- a/src/engines/bash-helper.sh
++++ b/src/engines/bash-helper.sh
+@@ -1,7 +1,7 @@
+ #!/bin/sh
+ 
+ # Set PS4, the sh -x prompt.
+-PS4='kcov@${BASH_SOURCE}@${LINENO}@'
++PS4='kcov@${BASH_SOURCE-}@${LINENO}@'
+ 
+ # Turn on tracing
+ set -x

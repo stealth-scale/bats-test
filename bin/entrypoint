@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+#
+# entrypoint: the commands of the bats-test image.
+#
+#   test [BATS ARGUMENTS]                      bats, default: --recursive tests/
+#   coverage [KCOV-BATS OPTIONS] [-- BATS ARGUMENTS]
+#                                              the suite under kcov; see kcov-bats --help
+#   shell                                      an interactive bash
+#   versions                                   bash, bats and kcov versions
+#   COMMAND [ARGUMENTS]                        any other command, as is
+#
+# The checkout is expected at /code, mounted by the caller.
+set -uo pipefail
+
+case "${1-test}" in
+    test)
+        shift || true
+        (( $# > 0 )) || set -- --recursive tests/
+        exec bats "$@" ;;
+    coverage)
+        shift || true
+        exec kcov-bats "$@" ;;
+    shell)
+        exec bash -l ;;
+    versions)
+        printf 'bash %s\nbats %s\nkcov %s\n' \
+            "${BASH_VERSION}" "$(bats --version | sed 's/^Bats //')" "$(kcov --version | sed 's/^kcov //')" ;;
+    -h|--help|help)
+        sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *)
+        exec "$@" ;;
+esac

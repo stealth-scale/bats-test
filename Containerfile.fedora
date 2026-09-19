@@ -1,0 +1,46 @@
+# The glibc variant of the stealth test image: Fedora's own bash and bats, kcov built
+# from source with the same helper fix as the Alpine image. The target platform of
+# stealthos, for what only glibc shows: locale handling for one.
+#
+#   KCOV_VERSION  a kcov tag
+#
+# A consumer mounts its checkout at /code and runs `test`, `coverage` or `shell`;
+# see bin/entrypoint.
+ARG FEDORA_VERSION=44
+
+FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} AS kcov
+ARG KCOV_VERSION=v43
+RUN dnf install -y --setopt=install_weak_deps=False \
+        binutils-devel cmake gcc-c++ git libcurl-devel elfutils-devel elfutils-libelf-devel \
+        openssl-devel ninja-build python3 zlib-devel \
+    && dnf clean all
+COPY patches /tmp/patches
+RUN git -c advice.detachedHead=false clone --quiet --depth 1 --branch "${KCOV_VERSION}" \
+        https://github.com/SimonKagstrom/kcov.git /src \
+    && cd /src \
+    && git apply /tmp/patches/*.patch \
+    && mkdir build && cd build \
+    && cmake -G Ninja .. >/dev/null \
+    && cmake --build . >/dev/null \
+    && cmake --build . --target install >/dev/null
+
+FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION}
+ARG FEDORA_VERSION
+RUN dnf install -y --setopt=install_weak_deps=False \
+        bash bats git python3 jq diffutils findutils gawk hostname iproute procps-ng \
+        shadow-utils util-linux glibc-langpack-en glibc-langpack-nl \
+        libcurl elfutils-libs elfutils-libelf binutils zlib \
+    && dnf clean all
+
+COPY --from=kcov /usr/local/bin/kcov* /usr/local/bin/
+COPY bin/entrypoint bin/kcov-bats bin/bats-recording-status /usr/local/bin/
+
+# The image tests read these; on Fedora they are whatever dnf installed.
+RUN printf 'BATS_TEST_IMAGE_BASH=%s\nBATS_TEST_IMAGE_BATS=%s\n' \
+        "$(bash -c 'echo ${BASH_VERSION%%(*}')" "$(bats --version | sed 's/^Bats //')" > /etc/bats-test-image \
+    && cat /etc/bats-test-image
+ENV BATS_TEST_IMAGE_DISTRO=fedora
+
+WORKDIR /code
+ENTRYPOINT ["entrypoint"]
+CMD ["test"]

@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+#
+# kcov-bats: runs a bats suite under kcov and reports the line coverage of a source
+# directory.
+#
+#   kcov-bats [--src DIR] [--out DIR] [--min PERCENT] [--] [BATS ARGUMENTS...]
+#
+#   --src DIR      The directory whose files are measured. Default: /code/src
+#   --out DIR      Where kcov writes the report. Default: /code/coverage
+#   --min PERCENT  Fail when the coverage is under this percentage. Default: 0
+#
+# The exit status is bats' own: kcov's status is not reliable for a suite that
+# spawns and kills child processes. The percentage comes from the cobertura report
+# kcov writes, and is printed as the last line:
+#
+#   coverage: 94% of /code/src (floor 0%); report in /code/coverage/index.html
+#
+# kcov's bash parser has one known trap: a line inside a double-quoted string that
+# is a rule of `=` ending in the closing quote stops it for the rest of the file.
+# Put the rule in a variable.
+set -uo pipefail
+
+if [[ "${1-}" == -h || "${1-}" == --help ]]; then
+    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+    exit 0
+fi
+
+src=/code/src
+out=/code/coverage
+min=0
+while (( $# > 0 )); do
+    case "$1" in
+        --src) src="$2"; shift 2 ;;
+        --min) min="$2"; shift 2 ;;
+        --out) out="$2"; shift 2 ;;
+        --) shift; break ;;
+        *) break ;;
+    esac
+done
+if [[ ! "$min" =~ ^[0-9]+$ ]] || (( min > 100 )); then
+    printf 'kcov-bats: --min expects a percentage from 0 to 100, got %s\n' "$min" >&2
+    exit 2
+fi
+if [[ ! -d "$src" ]]; then
+    printf 'kcov-bats: no such source directory: %s\n' "$src" >&2
+    exit 2
+fi
+(( $# > 0 )) || set -- --recursive tests/
+
+mkdir -p "$out"
+status_file="$(mktemp)"
+trap 'rm -f "$status_file"' EXIT
+
+# bats runs through a small script that records bats' status where kcov cannot
+# change it. The status file lives outside the report, so the report stays clean.
+# --bash-parser: kcov would use /bin/bash, which this image does not have. The
+# pinned bash is the one on PATH.
+KCOV_BATS_STATUS="$status_file" \
+    kcov --bash-parser="$(command -v bash)" --include-path="$src" --exclude-pattern=.bats,/tmp/ "$out" \
+        bats-recording-status "$@"
+status="$(cat "$status_file" 2>/dev/null)"
+if [[ ! "$status" =~ ^[0-9]+$ ]]; then
+    printf 'kcov-bats: bats did not run to completion\n' >&2
+    exit 1
+fi
+
+report="$(find "$out" -mindepth 2 -maxdepth 2 -name cobertura.xml | head -n 1)"
+if [[ -z "$report" ]]; then
+    printf 'kcov-bats: kcov wrote no report under %s\n' "$out" >&2
+    exit 1
+fi
+percent="$(sed -n 's/.*<coverage line-rate="\([0-9.]*\)".*/\1/p' "$report" | awk '{ printf "%d", $1 * 100 }')"
+printf 'coverage: %s%% of %s (floor %s%%); report in %s/index.html\n' "$percent" "$src" "$min" "$out"
+
+(( status == 0 )) || exit "$status"
+(( percent >= min )) || exit 1
+exit 0

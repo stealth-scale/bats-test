@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Runs bats and writes its exit status to the file named by KCOV_BATS_STATUS.
+# kcov-bats traces this script instead of bats directly, so bats' status survives
+# whatever kcov returns. A script, not `bash -c`, so kcov uses its bash engine.
+bats "$@"
+printf '%s\n' "$?" > "${KCOV_BATS_STATUS:?}"
