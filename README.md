@@ -50,7 +50,9 @@ coverage: 93% of /code/src (floor 90%); report in /code/coverage/index.html
 ```
 
 It exits with bats' own status, then fails when the total is under `--min`. The last
-line is the summary, for scripts.
+line is the summary, for scripts. kcov's own output goes to `coverage/kcov.log`: the
+trace lines it cannot place, such as the inner lines of a multi-line comparison, and
+its errors. The log is printed when the suite did not run to completion.
 
 ## Why kcov is built from source
 

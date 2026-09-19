@@ -81,7 +81,7 @@ start_entrypoint() {
 @test "entrypoint: test -> runs bats on the arguments" {
     run entrypoint test "$fixture/tests/greet.bats"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"1..3"* ]]
+    [[ "$output" == *"1..4"* ]]
 }
 
 @test "entrypoint: test on a failing suite -> non-zero" {
@@ -201,6 +201,20 @@ start_entrypoint() {
     run kcov-bats --src "$fixture/src" --out "$out" -- --filter 'set -u' "$fixture/tests/greet.bats"
     [ "$status" -eq 0 ]
     [[ "$output" != *"unbound variable"* ]]
+}
+
+@test "kcov-bats: kcov's own output -> in OUT/kcov.log, not on stderr" {
+    run --separate-stderr kcov-bats --src "$fixture/src" --out "$out" -- "$fixture/tests/greet.bats"
+    [ "$status" -eq 0 ]
+    [ "$stderr" = "" ]
+    # The trace lines of the multi-line comparison in greet.bats, which kcov cannot place.
+    [[ "$(cat "$out/kcov.log")" == "hello, b == "* ]]
+}
+
+@test "kcov-bats: bats' own stderr -> on stderr" {
+    run --separate-stderr kcov-bats --src "$fixture/src" --out "$out" -- "$fixture/tests/missing.bats"
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"missing.bats"*"does not exist"* ]]
 }
 
 @test "kcov-bats: --min out of range -> usage error, exit 2" {

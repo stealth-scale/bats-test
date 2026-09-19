@@ -15,10 +15,11 @@ Every change a consumer would notice is recorded here. The format follows
   container: SIGINT and SIGTERM reach every process of a run, kcov included, and a
   second signal kills the run.
 - `kcov-bats`: bats under kcov with bats' own exit status, a table per file with the
-  uncovered lines, the percentage from cobertura and a `--min` floor.
+  uncovered lines, the percentage from cobertura, a `--min` floor, and kcov's own output
+  in `OUT/kcov.log` instead of the terminal.
 - kcov v43 built with a fix to its bash helper, so a traced `bash -c` child under `set -u`
   no longer fails with `BASH_SOURCE: unbound variable`.
 - Tests of the image, run inside it: tools, versions, every entrypoint command, its
-  signal handling, and the exit status and floor semantics of `kcov-bats`.
+  signal handling, and the exit status, floor and output semantics of `kcov-bats`.
 
 [Unreleased]: https://github.com/stealth-scale/bats-test/commits/main

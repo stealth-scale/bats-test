@@ -22,13 +22,17 @@
 #
 #   coverage: 93% of /code/src (floor 0%); report in /code/coverage/index.html
 #
+# kcov's own output goes to OUT/kcov.log. That is where kcov puts every trace line
+# it cannot place, such as the inner lines of a multi-line comparison, and its
+# errors. The log is printed when the suite did not run to completion.
+#
 # kcov's bash parser has one known trap: a line inside a double-quoted string that
 # is a rule of `=` ending in the closing quote stops it for the rest of the file.
 # Put the rule in a variable.
 set -uo pipefail
 
 if [[ "${1-}" == -h || "${1-}" == --help ]]; then
-    sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
 fi
 
@@ -64,11 +68,14 @@ trap 'rm -f "$status_file"' EXIT
 # change it. The status file lives outside the report, so the report stays clean.
 # --bash-parser: kcov would use /bin/bash, which this image does not have. The
 # pinned bash is the one on PATH.
+# kcov's stderr goes to the log. The traced script inherits that, so fd 3 carries
+# the real stderr along, and bats-recording-status puts it back for bats.
 KCOV_BATS_STATUS="$status_file" \
     kcov --bash-parser="$(command -v bash)" --include-path="$src" --exclude-pattern=.bats,/tmp/ "$out" \
-        bats-recording-status "$@"
+        bats-recording-status "$@" 3>&2 2>"$out/kcov.log"
 status="$(cat "$status_file" 2>/dev/null)"
 if [[ ! "$status" =~ ^[0-9]+$ ]]; then
+    cat "$out/kcov.log" >&2
     printf 'kcov-bats: bats did not run to completion\n' >&2
     exit 1
 fi

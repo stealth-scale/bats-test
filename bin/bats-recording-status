@@ -2,5 +2,8 @@
 # Runs bats and writes its exit status to the file named by KCOV_BATS_STATUS.
 # kcov-bats traces this script instead of bats directly, so bats' status survives
 # whatever kcov returns. A script, not `bash -c`, so kcov uses its bash engine.
+# kcov-bats sends kcov's stderr to a log and passes the real one as fd 3; bats
+# gets that one back.
+exec 2>&3 3>&-
 bats "$@"
 printf '%s\n' "$?" > "${KCOV_BATS_STATUS:?}"
