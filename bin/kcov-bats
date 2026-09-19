@@ -1,19 +1,26 @@
 #!/usr/bin/env bash
 #
 # kcov-bats: runs a bats suite under kcov and reports the line coverage of a source
-# directory.
+# directory, per file, with the uncovered lines.
 #
-#   kcov-bats [--src DIR] [--out DIR] [--min PERCENT] [--] [BATS ARGUMENTS...]
+#   kcov-bats [--src DIR] [--out DIR] [--min PERCENT] [--lines] [--] [BATS ARGUMENTS...]
 #
 #   --src DIR      The directory whose files are measured. Default: /code/src
 #   --out DIR      Where kcov writes the report. Default: /code/coverage
-#   --min PERCENT  Fail when the coverage is under this percentage. Default: 0
+#   --min PERCENT  Fail when the total coverage is under this percentage. Default: 0
+#   --lines        Also print the source of every uncovered line
+#
+# After the suite, a table with one row per file and a total:
+#
+#   file               lines  covered  percent  uncovered
+#   src/matrix.bash      188      176      93%  135-145, 482, 484
+#   total                188      176      93%
 #
 # The exit status is bats' own: kcov's status is not reliable for a suite that
 # spawns and kills child processes. The percentage comes from the cobertura report
 # kcov writes, and is printed as the last line:
 #
-#   coverage: 94% of /code/src (floor 0%); report in /code/coverage/index.html
+#   coverage: 93% of /code/src (floor 0%); report in /code/coverage/index.html
 #
 # kcov's bash parser has one known trap: a line inside a double-quoted string that
 # is a rule of `=` ending in the closing quote stops it for the rest of the file.
@@ -21,18 +28,20 @@
 set -uo pipefail
 
 if [[ "${1-}" == -h || "${1-}" == --help ]]; then
-    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
 fi
 
 src=/code/src
 out=/code/coverage
 min=0
+show_lines=0
 while (( $# > 0 )); do
     case "$1" in
         --src) src="$2"; shift 2 ;;
         --min) min="$2"; shift 2 ;;
         --out) out="$2"; shift 2 ;;
+        --lines) show_lines=1; shift ;;
         --) shift; break ;;
         *) break ;;
     esac
@@ -69,6 +78,71 @@ if [[ -z "$report" ]]; then
     printf 'kcov-bats: kcov wrote no report under %s\n' "$out" >&2
     exit 1
 fi
+# The table. cobertura lists every file as a class with one line element per
+# executable line and its hit count; consecutive uncovered lines are shown as ranges.
+printf '\n'
+awk -v show="$show_lines" -v src="$src" '
+    function flush(   i) {
+        if (file == "") return
+        add_range()
+        rows[++n] = sprintf("%s\t%d\t%d\t%d%%\t%s", file, total, covered, (total ? covered * 100 / total : 100), ranges)
+        if (show && ranges != "") {
+            detail[n] = ""
+            for (i = 1; i <= miss_n; i++)
+                detail[n] = detail[n] sprintf("  %s:%d: %s\n", file, miss[i], source(path, miss[i]))
+        }
+        sum_total += total; sum_covered += covered
+        file = ""; total = 0; covered = 0; ranges = ""; miss_n = 0; start = 0; prev = 0
+    }
+    function source(p, n,   i, line) {
+        i = 0
+        while ((getline line < p) > 0) { if (++i == n) break }
+        close(p)
+        sub(/^[ \t]+/, "", line)
+        return line
+    }
+    function add_range() {
+        if (start == 0) return
+        ranges = ranges (ranges == "" ? "" : ", ") (start == prev ? start : start "-" prev)
+        start = 0
+    }
+    # The filename is absolute for one file and relative to the source root for
+    # several; the path is made absolute for reading and shown relative to /code.
+    /<class / {
+        flush()
+        match($0, /filename="[^"]*"/); path = substr($0, RSTART + 10, RLENGTH - 11)
+        if (path !~ /^\//) path = src "/" path
+        file = path; sub(/^\/code\//, "", file)
+    }
+    /<line / {
+        match($0, /number="[0-9]+"/); num = substr($0, RSTART + 8, RLENGTH - 9) + 0
+        match($0, /hits="[0-9]+"/);   hits = substr($0, RSTART + 6, RLENGTH - 7) + 0
+        total++
+        if (hits > 0) { covered++; add_range(); next }
+        miss[++miss_n] = num
+        if (start == 0) { start = num; prev = num } else if (num == prev + 1) { prev = num } else { add_range(); start = num; prev = num }
+    }
+    END {
+        flush()
+        # Sort the file rows by name; kcov lists them in hash order.
+        for (i = 2; i <= n; i++) {
+            row = rows[i]; det = (i in detail) ? detail[i] : ""; j = i - 1
+            while (j >= 1 && rows[j] > row) { rows[j + 1] = rows[j]; if (j in detail) detail[j + 1] = detail[j]; else delete detail[j + 1]; j-- }
+            rows[j + 1] = row; if (det != "") detail[j + 1] = det; else delete detail[j + 1]
+        }
+        rows[++n] = sprintf("total\t%d\t%d\t%d%%\t", sum_total, sum_covered, (sum_total ? sum_covered * 100 / sum_total : 100))
+        width = 4
+        for (i = 1; i <= n; i++) { split(rows[i], f, "\t"); if (length(f[1]) > width) width = length(f[1]) }
+        printf "%-*s  %5s  %7s  %7s  %s\n", width, "file", "lines", "covered", "percent", "uncovered"
+        for (i = 1; i <= n; i++) {
+            split(rows[i], f, "\t")
+            printf "%-*s  %5s  %7s  %7s  %s\n", width, f[1], f[2], f[3], f[4], f[5]
+            if (i in detail) printf "%s", detail[i]
+        }
+    }
+' "$report"
+printf '\n'
+
 percent="$(sed -n 's/.*<coverage line-rate="\([0-9.]*\)".*/\1/p' "$report" | awk '{ printf "%d", $1 * 100 }')"
 printf 'coverage: %s%% of %s (floor %s%%); report in %s/index.html\n' "$percent" "$src" "$min" "$out"
 

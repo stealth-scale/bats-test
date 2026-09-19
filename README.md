@@ -26,7 +26,7 @@ podman run --rm -v "$PWD:/code:ro" -v "$PWD/coverage:/code/coverage" \
 | Command | What it does |
 | --- | --- |
 | `test [BATS ARGUMENTS]` | `bats`, by default `--recursive tests/` |
-| `coverage [--src DIR] [--out DIR] [--min PERCENT] [-- BATS ARGUMENTS]` | the suite under kcov; the line coverage of `DIR`, default `/code/src`, written to `/code/coverage` |
+| `coverage [--src DIR] [--out DIR] [--min PERCENT] [--lines] [-- BATS ARGUMENTS]` | the suite under kcov, then the coverage table of `DIR`, default `/code/src`; the report goes to `/code/coverage` |
 | `shell` | an interactive bash |
 | `versions` | bash, bats and kcov versions |
 | anything else | run as is: `jq --version`, `bash -c '…'` |
@@ -35,12 +35,19 @@ The image runs as whatever user the caller names, needs no capability and no net
 and `coverage` needs only the report directory writable. The Makefiles of the consumers
 carry the full `run` line.
 
-`coverage` exits with bats' own status, then fails when the percentage is under `--min`.
-Its last line is the summary:
+`coverage` prints a table after the suite, one row per file and a total, with the
+uncovered lines as ranges. `--lines` adds the source of each uncovered line.
 
 ```
-coverage: 94% of /code/src (floor 90%); report in /code/coverage/index.html
+file               lines  covered  percent  uncovered
+src/matrix.bash      188      176      93%  135-145, 482, 484
+total                188      176      93%
+
+coverage: 93% of /code/src (floor 90%); report in /code/coverage/index.html
 ```
+
+It exits with bats' own status, then fails when the total is under `--min`. The last
+line is the summary, for scripts.
 
 ## Why kcov is built from source
 

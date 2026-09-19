@@ -115,6 +115,18 @@ setup() {
     (( BASH_REMATCH[1] >= 60 ))
 }
 
+@test "kcov-bats: table -> a header, one row per file and a total, uncovered as ranges" {
+    run kcov-bats --src "$fixture/src" --out "$out" -- "$fixture/tests/greet.bats"
+    [[ "$output" == *"file "*"lines  covered  percent  uncovered"* ]]
+    [[ "$output" =~ tests/fixture/src/greet\.bash\ +[0-9]+\ +[0-9]+\ +[0-9]+%\ +[0-9]+(-[0-9]+)? ]]
+    [[ "$output" =~ total\ +[0-9]+\ +[0-9]+\ +[0-9]+% ]]
+}
+
+@test "kcov-bats: --lines -> the source of every uncovered line" {
+    run kcov-bats --src "$fixture/src" --out "$out" --lines -- "$fixture/tests/greet.bats"
+    [[ "$output" == *"greet.bash:"*": printf 'this line is not covered"* ]]
+}
+
 @test "kcov-bats: --min above the result -> exit 1 after the coverage line" {
     run kcov-bats --src "$fixture/src" --out "$out" --min 100 -- "$fixture/tests/greet.bats"
     [ "$status" -eq 1 ]
