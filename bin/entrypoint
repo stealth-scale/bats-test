@@ -10,16 +10,67 @@
 #   COMMAND [ARGUMENTS]                        any other command, as is
 #
 # The checkout is expected at /code, mounted by the caller.
+#
+# This script is the init of the container. The runtime proxies SIGINT and SIGTERM
+# to PID 1, and PID 1 is the only process that gets them, so a command runs in its
+# own process group and every signal goes to the whole group: Ctrl+C and
+# `podman stop` end the run and each process under it, kcov included. A signal that
+# repeats kills the group. With a terminal attached the command replaces this
+# script instead, and the terminal's line discipline signals the group itself.
 set -uo pipefail
+
+job=
+signalled=0
+interrupted=0
+
+# entrypoint::forward SIGNAL
+#   Sends the signal to the process group of the job. A second signal, of any kind,
+#   kills the group, for a job that ignored the first.
+entrypoint::forward() {
+    interrupted=1
+    [[ -n "$job" ]] || return 0
+    if (( signalled )); then
+        kill -s KILL -- "-${job}" 2>/dev/null
+    else
+        signalled=1
+        kill -s "$1" -- "-${job}" 2>/dev/null
+    fi
+    return 0
+}
+
+# entrypoint::run COMMAND [ARGUMENTS]
+#   Runs the command as a job in its own process group and exits with its status.
+#   With a terminal on stdin the command replaces this process.
+entrypoint::run() {
+    local status
+    if [[ -t 0 ]]; then
+        exec "$@"
+    fi
+    trap 'entrypoint::forward INT' INT
+    trap 'entrypoint::forward TERM' TERM
+    trap 'entrypoint::forward HUP' HUP
+    # Job control gives the job its own process group and leaves it its stdin.
+    set -m
+    "$@" &
+    job=$!
+    # A trapped signal returns from wait before the job has ended, and the trap
+    # has run by the time the loop tests. Wait again until the job is done.
+    wait "$job"; status=$?
+    while (( interrupted )); do
+        interrupted=0
+        wait "$job"; status=$?
+    done
+    exit "$status"
+}
 
 case "${1-test}" in
     test)
         shift || true
         (( $# > 0 )) || set -- --recursive tests/
-        exec bats "$@" ;;
+        entrypoint::run bats "$@" ;;
     coverage)
         shift || true
-        exec kcov-bats "$@" ;;
+        entrypoint::run kcov-bats "$@" ;;
     shell)
         exec bash -l ;;
     versions)
@@ -28,5 +79,5 @@ case "${1-test}" in
     -h|--help|help)
         sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
     *)
-        exec "$@" ;;
+        entrypoint::run "$@" ;;
 esac

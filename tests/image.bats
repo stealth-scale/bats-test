@@ -22,6 +22,17 @@ setup() {
     : "${BATS_TEST_IMAGE_BASH:?}" "${BATS_TEST_IMAGE_BATS:?}" "${BATS_TEST_IMAGE_DISTRO:?}"
 }
 
+# start_entrypoint ARGUMENTS...
+#   Starts the entrypoint in the background, as the runtime starts PID 1: with
+#   SIGINT at its default. A plain `&` hands a child SIGINT ignored, which bash
+#   cannot trap afterwards. Sets `pid`.
+start_entrypoint() {
+    set -m
+    entrypoint "$@" </dev/null &
+    pid=$!
+    set +m
+}
+
 # ==============================================================================
 # GROUP 01: Tools and versions
 # ==============================================================================
@@ -92,9 +103,56 @@ setup() {
     [[ "$output" == jq-* ]]
 }
 
+@test "entrypoint: other command -> exits with its status" {
+    run entrypoint bash -c 'exit 7'
+    [ "$status" -eq 7 ]
+}
+
+@test "entrypoint: stdin -> reaches the command" {
+    run bash -c 'printf hello | entrypoint cat'
+    [ "$status" -eq 0 ]
+    [ "$output" = hello ]
+}
+
 @test "entrypoint: help -> lists the commands" {
     run entrypoint --help
     [[ "$output" == *"coverage"* ]]
+}
+
+@test "entrypoint: SIGINT -> ends the command, exit 130" {
+    start_entrypoint sleep 30
+    sleep 0.5
+    kill -s INT "$pid"
+    local status=0
+    wait "$pid" || status=$?
+    [ "$status" -eq 130 ]
+}
+
+@test "entrypoint: SIGTERM -> ends the command's children too, exit 143" {
+    local pidfile="$BATS_TEST_TMPDIR/child.pid"
+    # shellcheck disable=SC2016  # the script runs in the child bash
+    start_entrypoint bash -c 'sleep 30 & echo "$!" > "$1"; wait' _ "$pidfile"
+    local waited=0
+    until [[ -s "$pidfile" ]] || (( waited++ > 10 )); do sleep 0.2; done
+    [ -s "$pidfile" ]
+    kill -s TERM "$pid"
+    local status=0
+    wait "$pid" || status=$?
+    [ "$status" -eq 143 ]
+    sleep 0.2
+    run ! kill -0 "$(cat "$pidfile")"
+}
+
+@test "entrypoint: repeated signal -> kills a command that ignored the first, exit 137" {
+    start_entrypoint bash -c 'trap "" TERM; sleep 30 & wait'
+    sleep 0.5
+    kill -s TERM "$pid"
+    sleep 0.5
+    kill -0 "$pid"
+    kill -s TERM "$pid"
+    local status=0
+    wait "$pid" || status=$?
+    [ "$status" -eq 137 ]
 }
 
 # ==============================================================================

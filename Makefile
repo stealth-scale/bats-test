@@ -30,7 +30,8 @@ BASH_VERSIONS = 4.4 5.1 5.2 5.3
 BATS_VERSIONS = 1.7.0 1.14.0
 
 # As the calling user, no network, no capabilities; kcov's bash engine needs none.
-RUN = $(RUNTIME) run --rm --init --network=none --cap-drop=ALL --security-opt=label=disable \
+# No --init: the entrypoint is the init and forwards signals itself.
+RUN = $(RUNTIME) run --rm --network=none --cap-drop=ALL --security-opt=label=disable \
       --user $(shell id -u):$(shell id -g) $(if $(filter podman,$(RUNTIME)),--userns=keep-id) \
       --volume "$(CURDIR):/code:ro" --volume "$(CURDIR)/coverage:/code/coverage" --workdir /code
 
@@ -46,7 +47,7 @@ image: ## Build $(IMAGE)
 
 test: image ## Run tests/image.bats inside $(IMAGE)
 	rm -rf coverage && mkdir coverage
-	$(RUN) $(IMAGE) test tests/image.bats
+	$(RUN) $(IMAGE) test --print-output-on-failure tests/image.bats
 
 matrix: ## Build and test every cell
 	@for bash in $(BASH_VERSIONS); do for bats in $(BATS_VERSIONS); do \

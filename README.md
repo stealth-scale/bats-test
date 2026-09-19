@@ -32,8 +32,11 @@ podman run --rm -v "$PWD:/code:ro" -v "$PWD/coverage:/code/coverage" \
 | anything else | run as is: `jq --version`, `bash -c '…'` |
 
 The image runs as whatever user the caller names, needs no capability and no network,
-and `coverage` needs only the report directory writable. The Makefiles of the consumers
-carry the full `run` line.
+and `coverage` needs only the report directory writable. The entrypoint is the init of
+the container. It runs the command in its own process group and forwards SIGINT and
+SIGTERM to that group, so Ctrl+C and `podman stop` end a run and every process under
+it, kcov included. A second signal kills the group. `--init` is not needed. The
+Makefiles of the consumers carry the full `run` line.
 
 `coverage` prints a table after the suite, one row per file and a total, with the
 uncovered lines as ranges. `--lines` adds the source of each uncovered line.
