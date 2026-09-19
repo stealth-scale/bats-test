@@ -10,11 +10,16 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
+  # The ci workflow asks for packages: write, for its push to ghcr.io on main. A
+  # called workflow gets no more than its caller grants, so the grant is repeated
+  # here; on a tag the push steps do not run.
   verify:
     permissions:
       contents: read
+      packages: write
     uses: ./.github/workflows/ci.yml
 
   release:
