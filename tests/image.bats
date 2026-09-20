@@ -69,9 +69,17 @@ start_entrypoint() {
     command -v git
 }
 
-@test "image: alpine -> no /bin/bash, so scripts must use #!/usr/bin/env bash" {
-    [[ "$BATS_TEST_IMAGE_DISTRO" == alpine ]] || skip "Fedora ships /bin/bash"
-    [ ! -e /bin/bash ]
+@test "image: alpine -> /bin/bash is the bash this image was built with" {
+    # rpm pulls in Alpine's own bash, so /bin/bash exists whether we want it
+    # or not. It is a symlink to the built one, so a script with #!/bin/bash
+    # and a script with #!/usr/bin/env bash run the same interpreter.
+    [[ "$BATS_TEST_IMAGE_DISTRO" == alpine ]] || skip "Fedora ships its own /bin/bash"
+
+    [ -L /bin/bash ]
+    [ "$(readlink /bin/bash)" = /usr/local/bin/bash ]
+
+    run /bin/bash --version
+    [[ "$output" == *"version ${BATS_TEST_IMAGE_BASH}"* ]]
 }
 
 # ==============================================================================

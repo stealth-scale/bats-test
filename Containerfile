@@ -33,15 +33,22 @@ ARG BATS_VERSION=1.14.0
 
 # The GNU tools replace the busybox applets, so a suite sees the userland its library
 # targets. tar and the compressors are here for the same reason: busybox tar takes none
-# of the options a reproducible archive needs. The lib* packages are what kcov links
-# against.
+# of the options a reproducible archive needs. rpm brings rpmbuild and rpmkeys, so a
+# suite can make a package and ask the real tool about it rather than a mock, which is
+# the only way to catch an option the tool does not have. The lib* packages are what
+# kcov links against.
+#
+# rpm depends on rpm-scripts, which depends on Alpine's own bash, so /bin/bash appears
+# and would shadow the bash this image was built to test. The symlink below points it
+# at the built one, so there is one bash here whichever path reaches it.
 RUN apk add --no-cache coreutils findutils grep sed gawk diffutils git ca-certificates jq yq \
-        tar gzip bzip2 xz zstd curl iproute2 \
+        tar gzip bzip2 xz zstd curl iproute2 rpm \
         libcurl libdw zlib libgcc libstdc++ binutils-dev python3 \
     && git -c advice.detachedHead=false clone --quiet --depth 1 --branch "v${BATS_VERSION}" \
         https://github.com/bats-core/bats-core.git /tmp/bats \
     && /tmp/bats/install.sh /usr/local \
-    && rm -rf /tmp/bats
+    && rm -rf /tmp/bats \
+    && ln -sf /usr/local/bin/bash /bin/bash
 
 COPY --from=kcov /usr/local/bin/kcov* /usr/local/bin/
 COPY bin/entrypoint bin/kcov-bats bin/bats-recording-status /usr/local/bin/
