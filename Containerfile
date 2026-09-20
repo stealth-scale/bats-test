@@ -32,8 +32,11 @@ ARG BASH_VERSION
 ARG BATS_VERSION=1.14.0
 
 # The GNU tools replace the busybox applets, so a suite sees the userland its library
-# targets. The lib* packages are what kcov links against.
-RUN apk add --no-cache coreutils findutils grep sed gawk diffutils git ca-certificates jq \
+# targets. tar and the compressors are here for the same reason: busybox tar takes none
+# of the options a reproducible archive needs. The lib* packages are what kcov links
+# against.
+RUN apk add --no-cache coreutils findutils grep sed gawk diffutils git ca-certificates jq yq \
+        tar gzip bzip2 xz zstd curl iproute2 \
         libcurl libdw zlib libgcc libstdc++ binutils-dev python3 \
     && git -c advice.detachedHead=false clone --quiet --depth 1 --branch "v${BATS_VERSION}" \
         https://github.com/bats-core/bats-core.git /tmp/bats \
