@@ -69,6 +69,18 @@ start_entrypoint() {
     command -v git
 }
 
+@test "image: flock waits for a lock" {
+    # busybox supplies a flock with only -s, -x, -u and -n. Code that asks
+    # for a bounded wait gets "unrecognized option" and reads the failure as
+    # somebody else holding the lock, so a test of it passes for the wrong
+    # reason. The flock package supplies the one that takes -w.
+    run flock -w 1 /tmp/image-flock.lock true
+    [ "$status" -eq 0 ]
+
+    run flock --help
+    [[ "$output" != *"BusyBox"* ]]
+}
+
 @test "image: alpine -> /bin/bash is the bash this image was built with" {
     # rpm pulls in Alpine's own bash, so /bin/bash exists whether we want it
     # or not. It is a symlink to the built one, so a script with #!/bin/bash
