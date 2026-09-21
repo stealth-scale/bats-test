@@ -81,6 +81,33 @@ start_entrypoint() {
     [[ "$output" != *"BusyBox"* ]]
 }
 
+@test "image: bats can run a suite in parallel" {
+    # bats --jobs needs GNU parallel and says so rather than falling back to
+    # running one test at a time. Every test is its own process, so a suite
+    # that sources a large library pays for reading it once per test, and a
+    # machine with cores to spare should be able to use them.
+    run parallel --version
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"GNU parallel"* ]]
+}
+
+@test "image: bats --jobs -> runs every test and reports them all" {
+    # The count is what matters. A parallel run that loses a test, or one
+    # that reports a test twice, is worse than a slow one.
+    local suite="${BATS_TEST_TMPDIR}/parallel.bats"
+    {
+        printf '#!/usr/bin/env bats\n'
+        local i
+        for i in 1 2 3 4 5 6 7 8; do
+            printf '@test "case %s" { true; }\n' "$i"
+        done
+    } > "${suite}"
+
+    run bats --jobs 4 "${suite}"
+    [ "$status" -eq 0 ]
+    [ "$(grep -c '^ok ' <<< "$output")" -eq 8 ]
+}
+
 @test "image: alpine -> /bin/bash is the bash this image was built with" {
     # rpm pulls in Alpine's own bash, so /bin/bash exists whether we want it
     # or not. It is a symlink to the built one, so a script with #!/bin/bash

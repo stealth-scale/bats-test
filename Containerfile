@@ -41,8 +41,13 @@ ARG BATS_VERSION=1.14.0
 # rpm depends on rpm-scripts, which depends on Alpine's own bash, so /bin/bash appears
 # and would shadow the bash this image was built to test. The symlink below points it
 # at the built one, so there is one bash here whichever path reaches it.
+#
+# parallel is what bats --jobs runs a suite through. Without it bats runs one test at a
+# time, and a test costs the same again in setup as it does in assertions: a suite that
+# sources a large library re-reads the whole of it per test, because every test is its
+# own process. A machine with cores to spare should use them.
 RUN apk add --no-cache coreutils findutils grep sed gawk diffutils git ca-certificates jq yq \
-        tar gzip bzip2 xz zstd curl iproute2 rpm flock \
+        tar gzip bzip2 xz zstd curl iproute2 rpm flock parallel \
         libcurl libdw zlib libgcc libstdc++ binutils-dev python3 \
     && git -c advice.detachedHead=false clone --quiet --depth 1 --branch "v${BATS_VERSION}" \
         https://github.com/bats-core/bats-core.git /tmp/bats \
