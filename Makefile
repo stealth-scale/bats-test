@@ -19,6 +19,9 @@ KCOV_VERSION ?= v43
 ifeq ($(DISTRO),fedora)
 CONTAINERFILE = Containerfile.fedora
 TAG           = fedora
+else ifeq ($(DISTRO),builder)
+CONTAINERFILE = Containerfile.builder
+TAG           = builder
 else
 CONTAINERFILE = Containerfile
 TAG           = bash$(BASH_VERSION)-bats$(BATS_VERSION)
@@ -31,9 +34,22 @@ BATS_VERSIONS = 1.7.0 1.14.0
 
 # As the calling user, no network, no capabilities; kcov's bash engine needs none.
 # No --init: the entrypoint is the init and forwards signals itself.
-RUN = $(RUNTIME) run --rm --network=none --cap-drop=ALL --security-opt=label=disable \
+TEST_RUN = $(RUNTIME) run --rm --network=none --cap-drop=ALL --security-opt=label=disable \
       --user $(shell id -u):$(shell id -g) $(if $(filter podman,$(RUNTIME)),--userns=keep-id) \
       --volume "$(CURDIR):/code:ro" --volume "$(CURDIR)/coverage:/code/coverage" --workdir /code
+
+# The builder image runs a container engine, so it gets none of that. It keeps its own
+# user, because rootless nesting works through the subuid range that user was given, and
+# it needs /dev/fuse for the overlay its inner engine mounts. It has a network because
+# the suites in it pull images. The checkout is writable: a build writes.
+BUILDER_RUN = $(RUNTIME) run --rm --security-opt=label=disable --device /dev/fuse \
+      --volume "$(CURDIR):/code" --workdir /code
+
+ifeq ($(DISTRO),builder)
+RUN = $(BUILDER_RUN)
+else
+RUN = $(TEST_RUN)
+endif
 
 .PHONY: help image test matrix push lint check clean
 

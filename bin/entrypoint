@@ -74,8 +74,11 @@ case "${1-test}" in
     shell)
         exec bash -l ;;
     versions)
+        # The builder variant has no kcov: a suite that shells out to a
+        # container engine is not one kcov can read. It still has versions.
         printf 'bash %s\nbats %s\nkcov %s\n' \
-            "${BASH_VERSION}" "$(bats --version | sed 's/^Bats //')" "$(kcov --version | sed 's/^kcov //')" ;;
+            "${BASH_VERSION}" "$(bats --version | sed 's/^Bats //')" \
+            "$(kcov --version 2>/dev/null | sed 's/^kcov //' || echo absent)" ;;
     -h|--help|help)
         sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
     *)

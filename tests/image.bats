@@ -37,6 +37,11 @@ start_entrypoint() {
 # GROUP 01: Tools and versions
 # ==============================================================================
 
+# Skips a test that needs kcov, which the builder variant does not carry.
+require_kcov() {
+    command -v kcov > /dev/null 2>&1 || skip 'this image has no kcov'
+}
+
 @test "image: bash -> the pinned version" {
     run bash -c 'echo "$BASH_VERSION"'
     [[ "$output" == "${BATS_TEST_IMAGE_BASH}"* ]]
@@ -48,6 +53,7 @@ start_entrypoint() {
 }
 
 @test "image: kcov -> present, built with the nounset-safe helper" {
+    require_kcov
     run kcov --version
     [[ "$output" == kcov* ]]
     run strings /usr/local/bin/kcov
@@ -108,6 +114,66 @@ start_entrypoint() {
     [ "$(grep -c '^ok ' <<< "$output")" -eq 8 ]
 }
 
+@test "image: builder -> carries the tools a build calls for" {
+    # The other two images exist to run bats. This one exists to run a suite
+    # that builds software, which needs a compiler, rpmbuild and the image
+    # tools rather than just a shell.
+    [[ "$BATS_TEST_IMAGE_DISTRO" == builder ]] || skip 'not the builder image'
+
+    local tool
+    for tool in make gcc rpmbuild skopeo crane jq patch; do
+        run command -v "$tool"
+        [ "$status" -eq 0 ]
+    done
+}
+
+@test "image: builder -> carries a container engine" {
+    # A build runs every step in a container of its own, so the image that
+    # runs the suite has to be able to start one.
+    [[ "$BATS_TEST_IMAGE_DISTRO" == builder ]] || skip 'not the builder image'
+
+    run command -v podman
+    [ "$status" -eq 0 ]
+}
+
+@test "image: builder -> can start a container from inside this one" {
+    # Rootless nesting, which the RFC lists as a risk needing a test. It
+    # wants /dev/fuse and the calling user mapped onto this image's own,
+    # which is what the Makefile's BUILDER_RUN passes.
+    [[ "$BATS_TEST_IMAGE_DISTRO" == builder ]] || skip 'not the builder image'
+    [ -e /dev/fuse ] || skip 'no /dev/fuse, so no nesting'
+
+    run podman run --rm docker.io/library/alpine:3.22 true
+    [ "$status" -eq 0 ]
+}
+
+@test "image: builder -> a nested container inherits this one's hostname" {
+    # It cannot set its own: it shares this UTS namespace, and asking for a
+    # private one is refused by the kernel. What it inherits is what was
+    # pinned outside, which is how a build still cannot see the machine.
+    [[ "$BATS_TEST_IMAGE_DISTRO" == builder ]] || skip 'not the builder image'
+    [ -e /dev/fuse ] || skip 'no /dev/fuse, so no nesting'
+
+    local mine
+    mine=$(cat /etc/hostname)
+
+    run podman run --rm --network none docker.io/library/alpine:3.22 hostname
+    [ "$status" -eq 0 ]
+    [ "$output" = "$mine" ]
+}
+
+@test "image: builder -> a nested container is refused its own hostname" {
+    # Recorded because it is the reason the hostname is a setting rather
+    # than a constant: a library that always passes --hostname cannot run
+    # nested at all.
+    [[ "$BATS_TEST_IMAGE_DISTRO" == builder ]] || skip 'not the builder image'
+    [ -e /dev/fuse ] || skip 'no /dev/fuse, so no nesting'
+
+    run podman run --rm --hostname something docker.io/library/alpine:3.22 true
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'UTS namespace'* ]]
+}
+
 @test "image: alpine -> /bin/bash is the bash this image was built with" {
     # rpm pulls in Alpine's own bash, so /bin/bash exists whether we want it
     # or not. It is a symlink to the built one, so a script with #!/bin/bash
@@ -137,6 +203,8 @@ start_entrypoint() {
 }
 
 @test "entrypoint: versions -> three lines" {
+    # Three whatever the variant, because a variant without kcov still has a
+    # bash and a bats worth naming.
     run entrypoint versions
     [ "$status" -eq 0 ]
     [ "${#lines[@]}" -eq 3 ]
@@ -207,6 +275,7 @@ start_entrypoint() {
 # ==============================================================================
 
 @test "kcov-bats: passing suite -> exit 0 and a coverage line" {
+    require_kcov
     run kcov-bats --src "$fixture/src" --out "$out" -- "$fixture/tests/greet.bats"
     [ "$status" -eq 0 ]
     [[ "${lines[-1]}" == "coverage: "*"% of $fixture/src (floor 0%); report in $out/index.html" ]]
@@ -214,6 +283,7 @@ start_entrypoint() {
 }
 
 @test "kcov-bats: uncalled function -> counted as uncovered, under 100" {
+    require_kcov
     run kcov-bats --src "$fixture/src" --out "$out" -- "$fixture/tests/greet.bats"
     [[ "${lines[-1]}" =~ coverage:\ ([0-9]+)% ]]
     (( BASH_REMATCH[1] < 100 ))
@@ -221,6 +291,7 @@ start_entrypoint() {
 }
 
 @test "kcov-bats: table -> a header, one row per file and a total, uncovered as ranges" {
+    require_kcov
     run kcov-bats --src "$fixture/src" --out "$out" -- "$fixture/tests/greet.bats"
     [[ "$output" == *"file "*"lines  covered  percent  uncovered"* ]]
     [[ "$output" =~ tests/fixture/src/greet\.bash\ +[0-9]+\ +[0-9]+\ +[0-9]+%\ +[0-9]+(-[0-9]+)? ]]
@@ -228,35 +299,41 @@ start_entrypoint() {
 }
 
 @test "kcov-bats: --lines -> the source of every uncovered line" {
+    require_kcov
     run kcov-bats --src "$fixture/src" --out "$out" --lines -- "$fixture/tests/greet.bats"
     [[ "$output" == *"greet.bash:"*": printf 'this line is not covered"* ]]
 }
 
 @test "kcov-bats: --min above the result -> exit 1 after the coverage line" {
+    require_kcov
     run kcov-bats --src "$fixture/src" --out "$out" --min 100 -- "$fixture/tests/greet.bats"
     [ "$status" -eq 1 ]
     [[ "${lines[-1]}" == *"(floor 100%)"* ]]
 }
 
 @test "kcov-bats: failing suite -> bats' status, not kcov's" {
+    require_kcov
     run kcov-bats --src "$fixture/src" --out "$out" -- "$fixture/tests/failing.bats"
     [ "$status" -eq 1 ]
     [[ "$output" == *"not ok 1 fails on purpose"* ]]
 }
 
 @test "kcov-bats: child bash under set -u -> traced without an unbound variable error" {
+    require_kcov
     run kcov-bats --src "$fixture/src" --out "$out" -- --filter 'set -u' "$fixture/tests/greet.bats"
     [ "$status" -eq 0 ]
     [[ "$output" != *"unbound variable"* ]]
 }
 
 @test "kcov-bats: lines bash never reports -> not counted, a command that spans lines is one" {
+    require_kcov
     run kcov-bats --src "$fixture/src" --out "$out" -- "$fixture/tests/lines.bats"
     [ "$status" -eq 0 ]
     [[ "$output" =~ tests/fixture/src/lines\.bash\ +18\ +18\ +100% ]]
 }
 
 @test "kcov-bats: kcov's own output -> in OUT/kcov.log, not on stderr" {
+    require_kcov
     run --separate-stderr kcov-bats --src "$fixture/src" --out "$out" -- "$fixture/tests/greet.bats"
     [ "$status" -eq 0 ]
     [ "$stderr" = "" ]
@@ -265,22 +342,26 @@ start_entrypoint() {
 }
 
 @test "kcov-bats: bats' own stderr -> on stderr" {
+    require_kcov
     run --separate-stderr kcov-bats --src "$fixture/src" --out "$out" -- "$fixture/tests/missing.bats"
     [ "$status" -eq 1 ]
     [[ "$stderr" == *"missing.bats"*"does not exist"* ]]
 }
 
 @test "kcov-bats: --min out of range -> usage error, exit 2" {
+    require_kcov
     run kcov-bats --min 200 -- "$fixture/tests/greet.bats"
     [ "$status" -eq 2 ]
 }
 
 @test "kcov-bats: missing source directory -> exit 2" {
+    require_kcov
     run kcov-bats --src /nonexistent -- "$fixture/tests/greet.bats"
     [ "$status" -eq 2 ]
 }
 
 @test "kcov-bats: --help -> prints the usage" {
+    require_kcov
     run kcov-bats --help
     [ "$status" -eq 0 ]
     [[ "$output" == *"--min PERCENT"* ]]
