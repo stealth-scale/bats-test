@@ -354,6 +354,23 @@ require_kcov() {
     [ "$status" -eq 2 ]
 }
 
+@test "kcov-bats: --min with a leading zero -> a decimal floor" {
+    require_kcov
+    run kcov-bats --src "$fixture/src" --out "$out" --min 09 -- "$fixture/tests/greet.bats"
+    [ "$status" -eq 0 ]
+    [[ "${lines[-1]}" == *"(floor 9%)"* ]]
+}
+
+@test "kcov-bats: option without its value -> usage error, exit 2" {
+    require_kcov
+    local option
+    for option in --src --out --min; do
+        run kcov-bats "$option"
+        [ "$status" -eq 2 ]
+        [ "$output" = "kcov-bats: $option expects a value" ]
+    done
+}
+
 @test "kcov-bats: missing source directory -> exit 2" {
     require_kcov
     run kcov-bats --src /nonexistent -- "$fixture/tests/greet.bats"
