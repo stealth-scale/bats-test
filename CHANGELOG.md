@@ -6,6 +6,33 @@ Every change a consumer would notice is recorded here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-24
+
+### Added
+
+- GNU tar, gzip, bzip2, xz, zstd, curl, iproute2, yq, and rpm with rpmbuild and rpmkeys in
+  the Alpine image. The Fedora image carries yq and rpmbuild as well, so both tags have
+  the same set.
+- GNU parallel in the Alpine image, so `bats --jobs` runs a suite on several cores. The
+  Fedora image has it through Fedora's bats.
+- The builder variant, `Containerfile.builder` and `make image DISTRO=builder`: bats-core
+  on podman's image with make, gcc, rpm-build, skopeo, crane and jq, for suites that build
+  software. CI does not publish it.
+
+### Changed
+
+- `/bin/bash` in the Alpine image is a symlink to the bash the image was built with. rpm
+  pulls in Alpine's own bash, which would otherwise answer a `#!/bin/bash` script.
+
+### Fixed
+
+- The Alpine image's `flock` takes `-w`. BusyBox's rejected it, and code that waits for
+  a lock with a bound read the rejection as a lock somebody else held.
+- `kcov-bats --min` reads a value with a leading zero as decimal. `--min 09` stopped on
+  an arithmetic error instead of setting a 9% floor.
+- `kcov-bats` reports `--src`, `--out` or `--min` without a value as a usage error with
+  exit status 2, instead of stopping on an unbound variable.
+
 ## [1.0.0] - 2026-09-19
 
 First tagged release.
@@ -29,5 +56,6 @@ First tagged release.
 - Tests of the image, run inside it: tools, versions, every entrypoint command, its
   signal handling, and the exit status, floor and output semantics of `kcov-bats`.
 
-[Unreleased]: https://github.com/stealth-scale/bats-test/compare/v1.0.0...main
+[Unreleased]: https://github.com/stealth-scale/bats-test/compare/v1.1.0...main
+[1.1.0]: https://github.com/stealth-scale/bats-test/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/stealth-scale/bats-test/releases/tag/v1.0.0
