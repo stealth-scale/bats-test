@@ -114,6 +114,21 @@ require_kcov() {
     [ "$(grep -c '^ok ' <<< "$output")" -eq 8 ]
 }
 
+@test "image: build and archive tools -> the same set on Alpine and Fedora" {
+    # A suite that makes a package or an archive asks the real tool about it.
+    # The builder variant carries its own set and is tested for it below.
+    [[ "$BATS_TEST_IMAGE_DISTRO" != builder ]] || skip 'the builder image has its own set'
+
+    [[ "$(tar --version | head -1)" == *'GNU tar'* ]]
+    [[ "$(yq --version)" == *mikefarah* ]]
+    local tool missing=()
+    for tool in gzip bzip2 xz zstd curl ip rpm rpmbuild rpmkeys; do
+        command -v "$tool" > /dev/null || missing+=("$tool")
+    done
+    printf 'missing: %s\n' "${missing[*]-}"
+    [ "${#missing[@]}" -eq 0 ]
+}
+
 @test "image: builder -> carries the tools a build calls for" {
     # The other two images exist to run bats. This one exists to run a suite
     # that builds software, which needs a compiler, rpmbuild and the image

@@ -1,5 +1,5 @@
 # The glibc variant of the stealth test image: Fedora's own bash and bats, kcov built
-# from source with the same helper fix as the Alpine image. The target platform of
+# from source with the same patches as the Alpine image. The target platform of
 # stealthos, for what only glibc shows: locale handling for one.
 #
 #   KCOV_VERSION  a kcov tag
@@ -26,9 +26,11 @@ RUN git -c advice.detachedHead=false clone --quiet --depth 1 --branch "${KCOV_VE
 
 FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION}
 ARG FEDORA_VERSION
+# The tools of the Alpine image, from Fedora's packages. rpm-build brings rpmbuild; GNU
+# parallel, which bats --jobs runs through, comes with Fedora's bats.
 RUN dnf install -y --setopt=install_weak_deps=False \
-        bash bats git python3 jq diffutils findutils gawk hostname iproute procps-ng \
-        shadow-utils util-linux glibc-langpack-en glibc-langpack-nl \
+        bash bats git python3 jq yq diffutils findutils gawk hostname iproute procps-ng \
+        rpm-build shadow-utils util-linux glibc-langpack-en glibc-langpack-nl \
         libcurl elfutils-libs elfutils-libelf binutils zlib \
     && dnf clean all
 
