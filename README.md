@@ -9,8 +9,10 @@ and tested here, published to `ghcr.io/stealth-scale/bats-test`, pulled by every
 | `bash{4.4,5.1,5.2,5.3}-bats{1.7.0,1.14.0}` | the bash by bats matrix, on Alpine |
 | `fedora` | Fedora 44 with its own bash and bats, glibc |
 
-Every tag has the GNU tools in place of the busybox applets, jq, git, and kcov with three
-fixes of its own. The section on kcov states them.
+Every tag has the GNU tools in place of the busybox applets, GNU tar with gzip, bzip2, xz
+and zstd, jq, yq, git, curl, iproute2, rpm with rpmbuild and rpmkeys, a flock that takes
+`-w`, GNU parallel for `bats --jobs`, and kcov with three fixes of its own. The section on
+kcov states them.
 
 ## Using it
 
@@ -32,7 +34,8 @@ podman run --rm -v "$PWD:/code:ro" -v "$PWD/coverage:/code/coverage" \
 | anything else | run as is: `jq --version`, `bash -c '…'` |
 
 The image runs as whatever user the caller names, needs no capability and no network,
-and `coverage` needs only the report directory writable. The entrypoint is the init of
+and `coverage` needs only the report directory writable. The builder variant is the
+exception; its section says what it needs. The entrypoint is the init of
 the container. It runs the command in its own process group and forwards SIGINT and
 SIGTERM to that group, so Ctrl+C and `podman stop` end a run and every process under
 it, kcov included. A second signal kills the group. `--init` is not needed. The
@@ -80,12 +83,22 @@ its bash engine. The fixes are in [patches/](patches/), written for upstream.
   a command to its first line, takes the last line of a `[[ ]]` test, and skips the
   closing keywords. On bats-mock the count went from 659 lines at 88% to 613 at 100%.
 
+## The builder variant
+
+`Containerfile.builder` makes `bats-test:builder`, for suites that build software rather
+than only run bats. It is podman's own image with bats-core, make, gcc, rpm-build, skopeo,
+crane and jq, and a container engine for the build steps. It has no kcov, so it has no
+`coverage` command, and the image tests that need kcov skip there. It runs as its own user,
+with `--device /dev/fuse` and a network, which is the `BUILDER_RUN` line of the Makefile.
+CI does not publish it: `make image DISTRO=builder` builds it under the published name.
+
 ## Working here
 
 ```sh
 make image                                   # bash 5.2, bats 1.14.0, on Alpine
 make image BASH_VERSION=4.4 BATS_VERSION=1.7.0
 make image DISTRO=fedora
+make image DISTRO=builder                    # podman's image with a build toolchain
 make test                                    # the image's own tests, inside it
 make matrix                                  # every published cell, built and tested
 make lint                                    # shellcheck over the scripts and the tests

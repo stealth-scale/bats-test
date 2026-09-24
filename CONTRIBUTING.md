@@ -25,7 +25,9 @@ make check    # what CI runs per cell: lint, then test
 
 ## A change to the image
 
-- A tool goes into both Containerfiles, or the README says which tag lacks it.
+- A tool goes into `Containerfile` and `Containerfile.fedora`, or the README says which tag
+  lacks it. `Containerfile.builder` carries what a build calls for, and its README section
+  lists it.
 - A command of the entrypoint gets a test in `tests/image.bats`, named
   `<command>: <case> -> <expectation>`, and a row in the README table.
 - A new bash or bats version is one more value in `BASH_VERSIONS` or `BATS_VERSIONS` in the
@@ -47,7 +49,7 @@ tag on `main` for the changelog:
 
 Commit messages take the form `type(scope): summary`, as the standards for every stealth
 repository set out at https://docs.stealthscale.io. The scope is `alpine`, `fedora`,
-`entrypoint` or `kcov-bats` when a change stays in one.
+`builder`, `entrypoint` or `kcov-bats` when a change stays in one.
 
 ## Review
 

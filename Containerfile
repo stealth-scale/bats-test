@@ -9,10 +9,9 @@
 # see bin/entrypoint.
 ARG BASH_VERSION=5.2
 
-# kcov is built from source because its bash helpers need one fix: they expand
-# ${BASH_SOURCE} without a default, which breaks any traced `bash -c` child that
-# runs with `set -u`. patches/ holds the change as sent upstream. The recipe is
-# kcov's own Dockerfile for Alpine.
+# kcov is built from source with the three patches in patches/, which fix its bash
+# engine; the README states what each one changes. The recipe is kcov's own
+# Dockerfile for Alpine.
 FROM docker.io/library/alpine:3.22 AS kcov
 ARG KCOV_VERSION=v43
 RUN apk add --no-cache binutils-dev build-base cmake git curl-dev curl-static libdw openssl-dev \
