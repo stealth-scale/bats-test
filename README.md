@@ -42,7 +42,8 @@ it, kcov included. A second signal kills the group. `--init` is not needed. The
 Makefiles of the consumers carry the full `run` line.
 
 `coverage` prints a table after the suite, one row per file and a total, with the
-uncovered lines as ranges. `--lines` adds the source of each uncovered line.
+uncovered lines as ranges. `--lines` adds the source of each uncovered line. Each run
+replaces the coverage data that an earlier run left in the report directory.
 
 ```
 file               lines  covered  percent  uncovered

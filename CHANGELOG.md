@@ -6,6 +6,12 @@ Every change a consumer would notice is recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `kcov-bats` passes `--clean` to kcov, so the report and the `--min` floor cover the
+  current run only. kcov added the hits of an earlier run in the same `--out` directory, and
+  a second run could pass `--min 100` with lines that it never ran.
+
 ## [1.1.0] - 2026-09-24
 
 ### Added
