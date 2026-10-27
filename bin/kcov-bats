@@ -6,7 +6,7 @@
 #   kcov-bats [--src DIR] [--out DIR] [--min PERCENT] [--lines] [--] [BATS ARGUMENTS...]
 #
 #   --src DIR      The directory whose files are measured. Default: /code/src
-#   --out DIR      Where kcov writes the report. Default: /code/coverage
+#   --out DIR      Where kcov writes the report of this run alone. Default: /code/coverage
 #   --min PERCENT  Fail when the total coverage is under this percentage. Default: 0
 #   --lines        Also print the source of every uncovered line
 #
@@ -77,10 +77,11 @@ trap 'rm -f "$status_file"' EXIT
 # change it. The status file lives outside the report, so the report stays clean.
 # --bash-parser: kcov would use /bin/bash, which this image does not have. The
 # pinned bash is the one on PATH.
+# --clean: kcov would add the hits of an earlier run in the same OUT to the report.
 # kcov's stderr goes to the log. The traced script inherits that, so fd 3 carries
 # the real stderr along, and bats-recording-status puts it back for bats.
 KCOV_BATS_STATUS="$status_file" \
-    kcov --bash-parser="$(command -v bash)" --include-path="$src" --exclude-pattern=.bats,/tmp/ "$out" \
+    kcov --clean --bash-parser="$(command -v bash)" --include-path="$src" --exclude-pattern=.bats,/tmp/ "$out" \
         bats-recording-status "$@" 3>&2 2>"$out/kcov.log"
 status="$(cat "$status_file" 2>/dev/null)"
 if [[ ! "$status" =~ ^[0-9]+$ ]]; then

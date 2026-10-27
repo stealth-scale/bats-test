@@ -326,6 +326,21 @@ require_kcov() {
     [[ "${lines[-1]}" == *"(floor 100%)"* ]]
 }
 
+@test "kcov-bats: second run into the same --out -> the same report as a run into an empty one" {
+    require_kcov
+    local empty="$BATS_TEST_TMPDIR/empty"
+    # The first run covers every line of lines.bash. The second run calls one of
+    # its functions, so any further covered line in its report comes from the first run.
+    kcov-bats --src "$fixture/src" --out "$out" -- "$fixture/tests/lines.bats" > /dev/null
+    run kcov-bats --src "$fixture/src" --out "$empty" -- --filter 'lines::string' "$fixture/tests/lines.bats"
+    local expected="${output//"$empty"/OUT}"
+    [[ "$expected" =~ lines\.bash\ +18\ +([0-9]+) ]]
+    (( BASH_REMATCH[1] < 18 ))
+    run kcov-bats --src "$fixture/src" --out "$out" -- --filter 'lines::string' "$fixture/tests/lines.bats"
+    [ "$status" -eq 0 ]
+    [ "${output//"$out"/OUT}" = "$expected" ]
+}
+
 @test "kcov-bats: failing suite -> bats' status, not kcov's" {
     require_kcov
     run kcov-bats --src "$fixture/src" --out "$out" -- "$fixture/tests/failing.bats"
